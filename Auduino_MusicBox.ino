@@ -139,17 +139,44 @@ AdaEncoder tempoEncoder = AdaEncoder('a', TEMPO_ENCODER_PIN_1, TEMPO_ENCODER_PIN
 #define PLAY_ENCODER_PIN_2 7
 AdaEncoder playEncoder = AdaEncoder('b', PLAY_ENCODER_PIN_1, PLAY_ENCODER_PIN_2);
 
-// Encoder Button
-//
-#define ENCODER_PIN_BUTTON          8
-#define BUTTON_DEBOUNCE_TIME       20
-#define BUTTON_MULTI_CLICK_TIME   250
-#define BUTTON_LONG_CLICK_TIME    500
+// General Button Definitions
 #define SINGLE_CLICK                1
 #define DOUBLE_CLICK                2
 #define LONG_SINGLE_CLICK          -1
 #define LONG_DOUBLE_CLICK          -2
+#define BUTTON_DEBOUNCE_TIME       20
+#define BUTTON_MULTI_CLICK_TIME   250
+#define BUTTON_LONG_CLICK_TIME    500
+
+
+// Melody Encoder Button
+//
+#define ENCODER_PIN_BUTTON          8
 ClickButton button(ENCODER_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
+
+// Phone Button
+//
+#define PHONE_PIN_BUTTON          10
+ClickButton phoneButton(PHONE_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
+
+
+// Tempo Encoder Button
+//
+#define TEMPO_ENCODER_PIN_BUTTON         10
+#define TEMPO_BUTTON_DEBOUNCE_TIME       20
+#define TEMPO_BUTTON_MULTI_CLICK_TIME   250
+#define TEMPO_BUTTON_LONG_CLICK_TIME    500
+ClickButton tempoButton(TEMPO_ENCODER_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
+
+// Dial "Button"
+//
+#define DIAL_PIN_BUTTON                  9
+#define DIAL_DEBOUNCE_TIME              20
+#define DIAL_MULTI_CLICK_TIME_PLAY       1
+#define DIAL_MULTI_CLICK_TIME_SELECT    500
+#define DIAL_LONG_CLICK_TIME            100
+ClickButton dial(DIAL_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
+boolean dialIsMelodySelection;
 
 // Smooth logarithmic mapping
 //
@@ -247,6 +274,22 @@ void setup() {
   pinMode(PWM_PIN, OUTPUT);
   audioOn();
   pinMode(LED_PIN, OUTPUT);
+  button.debounceTime = BUTTON_DEBOUNCE_TIME;
+  button.multiclickTime = BUTTON_MULTI_CLICK_TIME;
+  button.longClickTime = BUTTON_LONG_CLICK_TIME;
+
+  tempoButton.debounceTime = BUTTON_DEBOUNCE_TIME;
+  tempoButton.multiclickTime = BUTTON_MULTI_CLICK_TIME;
+  tempoButton.longClickTime = BUTTON_LONG_CLICK_TIME;
+
+  phoneButton.debounceTime = BUTTON_DEBOUNCE_TIME;
+  phoneButton.multiclickTime = BUTTON_MULTI_CLICK_TIME;
+  phoneButton.longClickTime = BUTTON_LONG_CLICK_TIME;
+
+  dial.debounceTime = DIAL_DEBOUNCE_TIME;
+  dial.longClickTime = DIAL_LONG_CLICK_TIME;
+  dial.multiclickTime = DIAL_MULTI_CLICK_TIME_SELECT;
+  dialIsMelodySelection = true;
 }
 
 void loop() {
@@ -275,8 +318,11 @@ void loop() {
   processEnvelope();
 
   processTempoEncoder();
+  processTempoButton();
   processPlayEncoder();
   processButton();
+  processPhoneButton();
+  processDial();
   sequencerTimer.update();
 }
 
@@ -287,13 +333,7 @@ void processPlayEncoder()
 
   if (clicks == 0) return;
 
-  if (sequencerMode == SEQUENCER_MODE_MUSIC_BOX)
-  {
-    moveTargetPosition(-clicks);
-  } else
-  {
-    stepMelodyNote(-clicks);
-  }
+  doModeStep(-clicks);
 }
 
 void processTempoEncoder()
@@ -301,6 +341,17 @@ void processTempoEncoder()
   int8_t clicks = 0;
   clicks = tempoEncoder.query();
   sequencerBpm = max(min(sequencerBpm + clicks, SEQUENCER_MAX_BPM), SEQUENCER_MIN_BPM);
+}
+
+void doModeStep(int steps)
+{
+  if (sequencerMode == SEQUENCER_MODE_MUSIC_BOX)
+  {
+    moveTargetPosition(steps);
+  } else
+  {
+    stepMelodyNote(steps);
+  }  
 }
 
 
@@ -318,6 +369,66 @@ void processButton()
     } else if (button.clicks = LONG_SINGLE_CLICK)
     {
       toggleAutoSequencer();
+    }
+  }
+}
+
+void processTempoButton()
+{
+  tempoButton.Update();
+  if (tempoButton.clicks != 0)
+  {
+    if (tempoButton.clicks == SINGLE_CLICK)
+    {
+      toggleDialMode();
+    }
+  }
+}
+
+void processPhoneButton()
+{
+  phoneButton.Update();
+  if (phoneButton.clicks != 0)
+  {
+    Serial.print("Phone button click registered: ");
+    Serial.println(phoneButton.clicks);
+  }
+}
+
+void toggleDialMode()
+{
+  dialIsMelodySelection = !dialIsMelodySelection;
+
+  if (dialIsMelodySelection){
+    dial.multiclickTime = DIAL_MULTI_CLICK_TIME_SELECT;
+  } else
+  {
+    dial.multiclickTime = DIAL_MULTI_CLICK_TIME_PLAY;
+  }
+}
+
+void processDial()
+{
+  dial.Update();
+
+  if (dial.clicks != 0)
+  {
+    Serial.print("Dial click registered: ");
+    Serial.println(dial.clicks);
+    if (dialIsMelodySelection)
+    {
+      int clicks = -dial.clicks;
+      if (clicks != 0)
+      {
+        if (clicks == 10) clicks = 0;
+        currentMelody = min(clicks, maxMelody);
+        Serial.print("Dial click: ");
+        Serial.println(clicks);
+        Serial.print("Melody: ");
+        Serial.println(currentMelody);
+      }
+    } else if (dial.clicks > 0) {
+      doModeStep(1);
     }
   }
 }
