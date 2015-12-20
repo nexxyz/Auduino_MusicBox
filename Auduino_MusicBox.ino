@@ -156,7 +156,7 @@ ClickButton button(ENCODER_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
 
 // Phone Button
 //
-#define PHONE_PIN_BUTTON          10
+#define PHONE_PIN_BUTTON          11
 ClickButton phoneButton(PHONE_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
 
 
@@ -388,6 +388,7 @@ void processTempoButton()
   {
     if (tempoButton.clicks == SINGLE_CLICK)
     {
+      Serial.println("Dial mode toggled");
       toggleDialMode();
     }
   }
