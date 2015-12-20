@@ -109,7 +109,7 @@ uint8_t grain2Decay;
 #define MINIMUM_SEQUENCE_WINDUP -1024
 #define MAXIMUM_SEQUENCER_MODE 2
 #define SEQUENCER_MIN_BPM 40
-#define SEQUENCER_MAX_BPM 240
+#define SEQUENCER_MAX_BPM 480
 #define SEQUENCER_MODE_MANUAL 0
 #define SEQUENCER_MODE_MUSIC_BOX 1
 #define SEQUENCER_MODE_CONTINUOUS 2
@@ -290,6 +290,8 @@ void setup() {
   dial.longClickTime = DIAL_LONG_CLICK_TIME;
   dial.multiclickTime = DIAL_MULTI_CLICK_TIME_SELECT;
   dialIsMelodySelection = true;
+
+  Serial.println("Initialization complete");
 }
 
 void loop() {
@@ -340,7 +342,13 @@ void processTempoEncoder()
 {
   int8_t clicks = 0;
   clicks = tempoEncoder.query();
-  sequencerBpm = max(min(sequencerBpm + clicks, SEQUENCER_MAX_BPM), SEQUENCER_MIN_BPM);
+
+  if (clicks != 0)
+  {
+    sequencerBpm = max(min(sequencerBpm - clicks, SEQUENCER_MAX_BPM), SEQUENCER_MIN_BPM);
+    Serial.print("Tempo: ");
+    Serial.println(sequencerBpm);
+  }
 }
 
 void doModeStep(int steps)
@@ -540,6 +548,12 @@ void stepMelodyNote(int16_t stepSize)
   }
   Serial.print("Step: ");
   Serial.println(currentStep);
+
+  if (sequencerMode == SEQUENCER_MODE_CONTINUOUS)
+  {
+    sequencerTimer.stop(sequencerEventId);
+    sequencerEventId = sequencerTimer.every(getSequencerInterval(), singleMelodyNoteStep);
+  }
 }
 
 int16_t getCurrentMelodyMaxStep()
