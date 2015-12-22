@@ -114,11 +114,12 @@ uint8_t grain2Decay;
 #define SEQUENCER_MODE_MUSIC_BOX 1
 #define SEQUENCER_MODE_CONTINUOUS 2
 #define SEQUENCER_MAX_SLOWDOWN_FACTOR 6
+#define PAUSE -1
 int16_t sequencerPosition = 0;
 int16_t sequencerTarget = 0;
 uint8_t sequencerMode = SEQUENCER_MODE_MUSIC_BOX;
 boolean targetReached = true;
-uint8_t sequencerBpm = 120;
+uint16_t sequencerBpm = 120;
 
 uint16_t sequencerEventId;
 Timer sequencerTimer;
@@ -127,7 +128,6 @@ Timer sequencerTimer;
 #define VOLUME_DECAY_SCALE_FACTOR 50000000
 double volumeMultiplierSlope = 0;
 double volumeMultiplier = 0;
-
 
 // Encoders
 //
@@ -156,7 +156,7 @@ ClickButton button(ENCODER_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
 
 // Phone Button
 //
-#define PHONE_PIN_BUTTON          11
+#define PHONE_PIN_BUTTON          9
 ClickButton phoneButton(PHONE_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
 
 
@@ -170,13 +170,14 @@ ClickButton tempoButton(TEMPO_ENCODER_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
 
 // Dial "Button"
 //
-#define DIAL_PIN_BUTTON                  9
-#define DIAL_DEBOUNCE_TIME              20
-#define DIAL_MULTI_CLICK_TIME_PLAY       1
+#define DIAL_PIN_BUTTON                  11
+#define DIAL_DEBOUNCE_TIME               20
+#define DIAL_MULTI_CLICK_TIME_PLAY        1
 #define DIAL_MULTI_CLICK_TIME_SELECT    500
 #define DIAL_LONG_CLICK_TIME            100
 ClickButton dial(DIAL_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
 boolean dialIsMelodySelection;
+boolean dialFirstContact = true;
 
 // Smooth logarithmic mapping
 //
@@ -236,7 +237,7 @@ double currentStep = -0.5;
 // actual melodies start here
 // we assume 8ths - so a 4th is actually two steps
 int16_t alleMeineEntchenSteps[40] = {
-  0, 2, 4, 5, 7, -1, 7, -1, 9, 9, 9, 9, 7, -1, -1, -1, 9, 9, 9, 9, 7, -1, -1, -1, 5, 5, 5, 5, 4, -1, 4, -1, 2, 2, 2, 2, 0, -1, -1, -1
+  0, 2, 4, 5, 7, PAUSE, 7, PAUSE, 9, 9, 9, 9, 7, PAUSE, PAUSE, PAUSE, 9, 9, 9, 9, 7, PAUSE, PAUSE, PAUSE, 5, 5, 5, 5, 4, PAUSE, 4, PAUSE, 2, 2, 2, 2, 0, PAUSE, PAUSE, PAUSE
 };
 
 int16_t simpleArp[16] = {
@@ -244,7 +245,7 @@ int16_t simpleArp[16] = {
 };
 
 uint16_t mapMidiMelody(uint16_t input) {
-  if (getMelodyOffset(currentStep) != -1)
+  if (getMelodyOffset(currentStep) != PAUSE)
   {
     lastOffset = midiTable[wrap(getMidiOffset(input) + getMelodyOffset(currentStep), 0, 128)];
   }
@@ -328,6 +329,8 @@ void loop() {
   sequencerTimer.update();
 }
 
+void(* resetFunc) (void) = 0; //declare reset function @ address 0
+
 void processPlayEncoder()
 {
   int8_t clicks = 0;
@@ -340,7 +343,7 @@ void processPlayEncoder()
 
 void processTempoEncoder()
 {
-  int8_t clicks = 0;
+  int16_t clicks = 0;
   clicks = tempoEncoder.query();
 
   if (clicks != 0)
@@ -397,10 +400,13 @@ void processTempoButton()
 void processPhoneButton()
 {
   phoneButton.Update();
-  if (phoneButton.clicks != 0)
+  if (phoneButton.clicks == 1)
   {
-    Serial.print("Phone button click registered: ");
-    Serial.println(phoneButton.clicks);
+    volumeMultiplierSlope = 0;
+    volumeMultiplier = 0;
+  } else if (phoneButton.clicks == -1)
+  {
+    resetFunc();  //call reset
   }
 }
 
@@ -422,6 +428,13 @@ void processDial()
 
   if (dial.clicks != 0)
   {
+    if (dialFirstContact)
+    {
+      dialFirstContact = false;
+      Serial.println("First dial contact ignored");
+      return;
+    }
+    
     Serial.print("Dial click registered: ");
     Serial.println(dial.clicks);
     if (dialIsMelodySelection)
@@ -501,7 +514,6 @@ void stepMelodySelection(int16_t stepSize)
 void singleMelodyNoteStep()
 {
   stepMelodyNote(1);
-  Serial.println(volumeMultiplierSlope);
 }
 
 void sequencerStep()
@@ -543,12 +555,10 @@ void stepMelodyNote(int16_t stepSize)
 {
   currentStep = wrap(currentStep + stepSize, 0, getCurrentMelodyMaxStep());
 
-  if (getMelodyOffset(currentStep) != -1)
+  if (getMelodyOffset(currentStep) != PAUSE)
   {
     volumeMultiplier = 1;
   }
-  Serial.print("Step: ");
-  Serial.println(currentStep);
 
   if (sequencerMode == SEQUENCER_MODE_CONTINUOUS)
   {
@@ -573,7 +583,7 @@ void moveTargetPosition(int16_t stepSize)
   sequencerTarget = max(min(sequencerTarget + stepSize, MAXIMUM_SEQUENCE_WINDUP), MINIMUM_SEQUENCE_WINDUP);
 }
 
-uint8_t getSequencerInterval()
+uint16_t getSequencerInterval()
 {
   // we're calculating with 8ths, so actually calculate beats per half-minute
   return 30000 / sequencerBpm;
