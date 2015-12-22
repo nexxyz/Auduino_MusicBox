@@ -109,16 +109,17 @@ uint8_t grain2Decay;
 #define MINIMUM_SEQUENCE_WINDUP -1024
 #define MAXIMUM_SEQUENCER_MODE 2
 #define SEQUENCER_MIN_BPM 40
-#define SEQUENCER_MAX_BPM 240
+#define SEQUENCER_MAX_BPM 480
 #define SEQUENCER_MODE_MANUAL 0
 #define SEQUENCER_MODE_MUSIC_BOX 1
 #define SEQUENCER_MODE_CONTINUOUS 2
 #define SEQUENCER_MAX_SLOWDOWN_FACTOR 6
+#define PAUSE -1
 int16_t sequencerPosition = 0;
 int16_t sequencerTarget = 0;
 uint8_t sequencerMode = SEQUENCER_MODE_MUSIC_BOX;
 boolean targetReached = true;
-uint8_t sequencerBpm = 120;
+uint16_t sequencerBpm = 120;
 
 uint16_t sequencerEventId;
 Timer sequencerTimer;
@@ -127,7 +128,6 @@ Timer sequencerTimer;
 #define VOLUME_DECAY_SCALE_FACTOR 50000000
 double volumeMultiplierSlope = 0;
 double volumeMultiplier = 0;
-
 
 // Encoders
 //
@@ -139,17 +139,45 @@ AdaEncoder tempoEncoder = AdaEncoder('a', TEMPO_ENCODER_PIN_1, TEMPO_ENCODER_PIN
 #define PLAY_ENCODER_PIN_2 7
 AdaEncoder playEncoder = AdaEncoder('b', PLAY_ENCODER_PIN_1, PLAY_ENCODER_PIN_2);
 
-// Encoder Button
-//
-#define ENCODER_PIN_BUTTON          8
-#define BUTTON_DEBOUNCE_TIME       20
-#define BUTTON_MULTI_CLICK_TIME   250
-#define BUTTON_LONG_CLICK_TIME    500
+// General Button Definitions
 #define SINGLE_CLICK                1
 #define DOUBLE_CLICK                2
 #define LONG_SINGLE_CLICK          -1
 #define LONG_DOUBLE_CLICK          -2
+#define BUTTON_DEBOUNCE_TIME       20
+#define BUTTON_MULTI_CLICK_TIME   250
+#define BUTTON_LONG_CLICK_TIME    500
+
+
+// Melody Encoder Button
+//
+#define ENCODER_PIN_BUTTON          8
 ClickButton button(ENCODER_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
+
+// Phone Button
+//
+#define PHONE_PIN_BUTTON          9
+ClickButton phoneButton(PHONE_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
+
+
+// Tempo Encoder Button
+//
+#define TEMPO_ENCODER_PIN_BUTTON         10
+#define TEMPO_BUTTON_DEBOUNCE_TIME       20
+#define TEMPO_BUTTON_MULTI_CLICK_TIME   250
+#define TEMPO_BUTTON_LONG_CLICK_TIME    500
+ClickButton tempoButton(TEMPO_ENCODER_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
+
+// Dial "Button"
+//
+#define DIAL_PIN_BUTTON                  11
+#define DIAL_DEBOUNCE_TIME               20
+#define DIAL_MULTI_CLICK_TIME_PLAY        1
+#define DIAL_MULTI_CLICK_TIME_SELECT    500
+#define DIAL_LONG_CLICK_TIME            100
+ClickButton dial(DIAL_PIN_BUTTON, LOW, CLICKBTN_PULLUP);
+boolean dialIsMelodySelection;
+boolean dialFirstContact = true;
 
 // Smooth logarithmic mapping
 //
@@ -209,7 +237,7 @@ double currentStep = -0.5;
 // actual melodies start here
 // we assume 8ths - so a 4th is actually two steps
 int16_t alleMeineEntchenSteps[40] = {
-  0, 2, 4, 5, 7, -1, 7, -1, 9, 9, 9, 9, 7, -1, -1, -1, 9, 9, 9, 9, 7, -1, -1, -1, 5, 5, 5, 5, 4, -1, 4, -1, 2, 2, 2, 2, 0, -1, -1, -1
+  0, 2, 4, 5, 7, PAUSE, 7, PAUSE, 9, 9, 9, 9, 7, PAUSE, PAUSE, PAUSE, 9, 9, 9, 9, 7, PAUSE, PAUSE, PAUSE, 5, 5, 5, 5, 4, PAUSE, 4, PAUSE, 2, 2, 2, 2, 0, PAUSE, PAUSE, PAUSE
 };
 
 int16_t simpleArp[16] = {
@@ -217,7 +245,7 @@ int16_t simpleArp[16] = {
 };
 
 uint16_t mapMidiMelody(uint16_t input) {
-  if (getMelodyOffset(currentStep) != -1)
+  if (getMelodyOffset(currentStep) != PAUSE)
   {
     lastOffset = midiTable[wrap(getMidiOffset(input) + getMelodyOffset(currentStep), 0, 128)];
   }
@@ -247,6 +275,28 @@ void setup() {
   pinMode(PWM_PIN, OUTPUT);
   audioOn();
   pinMode(LED_PIN, OUTPUT);
+  button.debounceTime = BUTTON_DEBOUNCE_TIME;
+  button.multiclickTime = BUTTON_MULTI_CLICK_TIME;
+  button.longClickTime = BUTTON_LONG_CLICK_TIME;
+
+  tempoButton.debounceTime = BUTTON_DEBOUNCE_TIME;
+  tempoButton.multiclickTime = BUTTON_MULTI_CLICK_TIME;
+  tempoButton.longClickTime = BUTTON_LONG_CLICK_TIME;
+
+  phoneButton.debounceTime = BUTTON_DEBOUNCE_TIME;
+  phoneButton.multiclickTime = BUTTON_MULTI_CLICK_TIME;
+  phoneButton.longClickTime = BUTTON_LONG_CLICK_TIME;
+
+  dial.debounceTime = DIAL_DEBOUNCE_TIME;
+  dial.longClickTime = DIAL_LONG_CLICK_TIME;
+  dial.multiclickTime = DIAL_MULTI_CLICK_TIME_SELECT;
+  dialIsMelodySelection = true;
+
+  pinMode(12, OUTPUT);
+  pinMode(13, OUTPUT);
+  displayModeOnLed(HIGH, LOW);
+
+  Serial.println("Initialization complete");
 }
 
 void loop() {
@@ -262,23 +312,28 @@ void loop() {
   //syncPhaseInc = mapMidi(analogRead(SYNC_CONTROL));
 
   // Stepped mapping to MIDI plus Melody
-  syncPhaseInc = mapMidiMelody(analogRead(SYNC_CONTROL));
+  syncPhaseInc = mapMidiMelody(1024 - analogRead(SYNC_CONTROL));
 
   // Stepped pentatonic mapping: D, E, G, A, B
   //syncPhaseInc = mapPentatonic(analogRead(SYNC_CONTROL));
 
-  grainPhaseInc  = mapPhaseInc(analogRead(GRAIN_FREQ_CONTROL)) / 2;
+  grainPhaseInc  = mapPhaseInc(1024 - analogRead(GRAIN_FREQ_CONTROL)) / 2;
   grainDecay     = analogRead(GRAIN_DECAY_CONTROL) / 8;
-  grain2PhaseInc = mapPhaseInc(analogRead(GRAIN2_FREQ_CONTROL)) / 2;
+  grain2PhaseInc = mapPhaseInc(1024 - analogRead(GRAIN2_FREQ_CONTROL)) / 2;
   grain2Decay    = analogRead(GRAIN2_DECAY_CONTROL) / 4;
-  volumeMultiplierSlope = pow(analogRead(VOLUME_DECAY_CONTROL), 2) / VOLUME_DECAY_SCALE_FACTOR;
+  volumeMultiplierSlope = pow(1024 - analogRead(VOLUME_DECAY_CONTROL), 2) / VOLUME_DECAY_SCALE_FACTOR;
   processEnvelope();
 
   processTempoEncoder();
+  processTempoButton();
   processPlayEncoder();
   processButton();
+  processPhoneButton();
+  processDial();
   sequencerTimer.update();
 }
+
+void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
 void processPlayEncoder()
 {
@@ -287,20 +342,37 @@ void processPlayEncoder()
 
   if (clicks == 0) return;
 
-  if (sequencerMode == SEQUENCER_MODE_MUSIC_BOX)
-  {
-    moveTargetPosition(-clicks);
-  } else
-  {
-    stepMelodyNote(-clicks);
-  }
+  doModeStep(-clicks);
 }
 
 void processTempoEncoder()
 {
-  int8_t clicks = 0;
+  int16_t clicks = 0;
   clicks = tempoEncoder.query();
-  sequencerBpm = max(min(sequencerBpm + clicks, SEQUENCER_MAX_BPM), SEQUENCER_MIN_BPM);
+
+  if (clicks != 0)
+  {
+    sequencerBpm = max(min(sequencerBpm - clicks, SEQUENCER_MAX_BPM), SEQUENCER_MIN_BPM);
+    Serial.print("Tempo: ");
+    Serial.println(sequencerBpm);
+  }
+}
+
+void displayModeOnLed(boolean firstLed, boolean secondLed)
+{
+  digitalWrite(12, firstLed);
+  digitalWrite(13, secondLed);
+}
+
+void doModeStep(int steps)
+{
+  if (sequencerMode == SEQUENCER_MODE_MUSIC_BOX)
+  {
+    moveTargetPosition(steps);
+  } else
+  {
+    stepMelodyNote(steps);
+  }  
 }
 
 
@@ -322,6 +394,77 @@ void processButton()
   }
 }
 
+void processTempoButton()
+{
+  tempoButton.Update();
+  if (tempoButton.clicks != 0)
+  {
+    if (tempoButton.clicks == SINGLE_CLICK)
+    {
+      Serial.println("Dial mode toggled");
+      toggleDialMode();
+    }
+  }
+}
+
+void processPhoneButton()
+{
+  phoneButton.Update();
+  if (phoneButton.clicks == 1)
+  {
+    volumeMultiplierSlope = 0;
+    volumeMultiplier = 0;
+  } else if (phoneButton.clicks == -1)
+  {
+    resetFunc();  //call reset
+  }
+}
+
+void toggleDialMode()
+{
+  dialIsMelodySelection = !dialIsMelodySelection;
+
+  if (dialIsMelodySelection){
+    dial.multiclickTime = DIAL_MULTI_CLICK_TIME_SELECT;
+  } else
+  {
+    dial.multiclickTime = DIAL_MULTI_CLICK_TIME_PLAY;
+  }
+}
+
+void processDial()
+{
+  dial.Update();
+
+  if (dial.clicks != 0)
+  {
+    if (dialFirstContact)
+    {
+      dialFirstContact = false;
+      Serial.println("First dial contact ignored");
+      return;
+    }
+    
+    Serial.print("Dial click registered: ");
+    Serial.println(dial.clicks);
+    if (dialIsMelodySelection)
+    {
+      int clicks = -dial.clicks;
+      if (clicks != 0)
+      {
+        if (clicks == 10) clicks = 0;
+        currentMelody = min(clicks, maxMelody);
+        Serial.print("Dial click: ");
+        Serial.println(clicks);
+        Serial.print("Melody: ");
+        Serial.println(currentMelody);
+      }
+    } else {
+      doModeStep(1);
+    }
+  }
+}
+
 void processEnvelope()
 {
   volumeMultiplier = max(volumeMultiplier - volumeMultiplierSlope, 0);
@@ -335,13 +478,16 @@ void toggleAutoSequencer() {
   if (sequencerMode == SEQUENCER_MODE_MUSIC_BOX)
   {
     Serial.println("Music Box mode");
+    displayModeOnLed(HIGH, LOW);
     targetReached = true;
   } else if (sequencerMode == SEQUENCER_MODE_MANUAL)
   {
     Serial.println("Manual mode");
+    displayModeOnLed(LOW, HIGH);
   } else if (sequencerMode == SEQUENCER_MODE_CONTINUOUS)
   {
     Serial.println("Continuous Run mode");
+    displayModeOnLed(HIGH, HIGH);
     sequencerEventId = sequencerTimer.every(getSequencerInterval(), singleMelodyNoteStep);
   }
 }
@@ -381,7 +527,6 @@ void stepMelodySelection(int16_t stepSize)
 void singleMelodyNoteStep()
 {
   stepMelodyNote(1);
-  Serial.println(volumeMultiplierSlope);
 }
 
 void sequencerStep()
@@ -423,12 +568,16 @@ void stepMelodyNote(int16_t stepSize)
 {
   currentStep = wrap(currentStep + stepSize, 0, getCurrentMelodyMaxStep());
 
-  if (getMelodyOffset(currentStep) != -1)
+  if (getMelodyOffset(currentStep) != PAUSE)
   {
     volumeMultiplier = 1;
   }
-  Serial.print("Step: ");
-  Serial.println(currentStep);
+
+  if (sequencerMode == SEQUENCER_MODE_CONTINUOUS)
+  {
+    sequencerTimer.stop(sequencerEventId);
+    sequencerEventId = sequencerTimer.every(getSequencerInterval(), singleMelodyNoteStep);
+  }
 }
 
 int16_t getCurrentMelodyMaxStep()
@@ -447,7 +596,7 @@ void moveTargetPosition(int16_t stepSize)
   sequencerTarget = max(min(sequencerTarget + stepSize, MAXIMUM_SEQUENCE_WINDUP), MINIMUM_SEQUENCE_WINDUP);
 }
 
-uint8_t getSequencerInterval()
+uint16_t getSequencerInterval()
 {
   // we're calculating with 8ths, so actually calculate beats per half-minute
   return 30000 / sequencerBpm;
@@ -465,7 +614,7 @@ SIGNAL(PWM_INTERRUPT)
     grainAmp = 0x7fff;
     grain2PhaseAcc = 0;
     grain2Amp = 0x7fff;
-    LED_PORT ^= 1 << LED_BIT; // Faster than using digitalWrite
+    // LED_PORT ^= 1 << LED_BIT; // Faster than using digitalWrite
   }
 
   // Increment the phase of the grain oscillators
