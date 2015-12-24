@@ -108,13 +108,13 @@ uint8_t grain2Decay;
 #define MAXIMUM_SEQUENCE_WINDUP 1024
 #define MINIMUM_SEQUENCE_WINDUP -1024
 #define MAXIMUM_SEQUENCER_MODE 2
-#define SEQUENCER_MIN_BPM 40
+#define SEQUENCER_MIN_BPM 30
 #define SEQUENCER_MAX_BPM 480
 #define SEQUENCER_MODE_MANUAL 0
 #define SEQUENCER_MODE_MUSIC_BOX 1
 #define SEQUENCER_MODE_CONTINUOUS 2
 #define SEQUENCER_MAX_SLOWDOWN_FACTOR 6
-#define PAUSE -1
+#define PAUSE -999
 int16_t sequencerPosition = 0;
 int16_t sequencerTarget = 0;
 uint8_t sequencerMode = SEQUENCER_MODE_MUSIC_BOX;
@@ -227,8 +227,8 @@ uint16_t mapPentatonic(uint16_t input) {
 
 // MELODIES!
 int16_t currentMelody = 1;
-int16_t maxMelody = 2;
-int16_t maxMelodySteps[3] = {0, 39, 15};
+int16_t maxMelody = 3;
+int16_t maxMelodySteps[4] = {0, 39, 15, 47};
 int16_t lastOffset = 0;
 
 // dirty dirty hack for making melodies start correctly backwards and forwards
@@ -243,6 +243,23 @@ int16_t alleMeineEntchenSteps[40] = {
 int16_t simpleArp[16] = {
   0, 12, 24, 0, 12, 24, 0, 12, 24, 0, 12, 24, 0, 12, 24, 12
 };
+
+int16_t oTannenbaum[48] = {
+  0, PAUSE, 
+  5, PAUSE, PAUSE, 5, 
+  5, PAUSE, PAUSE, PAUSE, 
+  PAUSE, PAUSE, 7, PAUSE, 
+  9, PAUSE, PAUSE, 9, 
+  9, PAUSE, PAUSE, PAUSE, 
+  PAUSE, PAUSE, 9, PAUSE, 
+  7, PAUSE, 9, PAUSE, 
+  10, PAUSE, PAUSE, PAUSE, 
+  4, PAUSE, PAUSE, PAUSE, 
+  7, PAUSE, PAUSE, PAUSE, 
+  5, PAUSE, PAUSE, PAUSE, 
+  PAUSE, PAUSE
+  };
+
 
 uint16_t mapMidiMelody(uint16_t input) {
   if (getMelodyOffset(currentStep) != PAUSE)
@@ -324,8 +341,7 @@ void loop() {
   volumeMultiplierSlope = pow(1024 - analogRead(VOLUME_DECAY_CONTROL), 2) / VOLUME_DECAY_SCALE_FACTOR;
   processEnvelope();
 
-  processTempoEncoder();
-  processTempoButton();
+  processTempoEncoderAndButton();
   processPlayEncoder();
   processButton();
   processPhoneButton();
@@ -345,14 +361,20 @@ void processPlayEncoder()
   doModeStep(-clicks);
 }
 
-void processTempoEncoder()
+void processTempoEncoderAndButton()
 {
   int16_t clicks = 0;
+  tempoButton.Update();
   clicks = tempoEncoder.query();
 
   if (clicks != 0)
   {
-    sequencerBpm = max(min(sequencerBpm - clicks, SEQUENCER_MAX_BPM), SEQUENCER_MIN_BPM);
+    int bpmToAdd = clicks;
+    if (tempoButton.depressed)
+    {
+      bpmToAdd *= 10;
+    }
+    sequencerBpm = max(min(sequencerBpm + bpmToAdd, SEQUENCER_MAX_BPM), SEQUENCER_MIN_BPM);
     Serial.print("Tempo: ");
     Serial.println(sequencerBpm);
   }
@@ -394,26 +416,12 @@ void processButton()
   }
 }
 
-void processTempoButton()
-{
-  tempoButton.Update();
-  if (tempoButton.clicks != 0)
-  {
-    if (tempoButton.clicks == SINGLE_CLICK)
-    {
-      Serial.println("Dial mode toggled");
-      toggleDialMode();
-    }
-  }
-}
-
 void processPhoneButton()
 {
   phoneButton.Update();
   if (phoneButton.clicks == 1)
   {
-    volumeMultiplierSlope = 0;
-    volumeMultiplier = 0;
+    toggleDialMode();
   } else if (phoneButton.clicks == -1)
   {
     resetFunc();  //call reset
@@ -501,6 +509,9 @@ int16_t getMelodyOffset(int16_t melodyPosition)
       break;
     case 2 :
       return simpleArp[melodyPosition];
+      break;
+    case 3 :
+      return oTannenbaum[melodyPosition];
       break;
     default:
       return 0;
